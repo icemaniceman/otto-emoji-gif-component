@@ -1,4 +1,4 @@
-name: Publish to ESP Component Registry
+name: Push component to Espressif Component Service
 
 on:
   push:
@@ -8,10 +8,8 @@ on:
     types: [published]  # Trigger when creating Release
 
 jobs:
-  publish:
+  upload_component:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Need write permission to create Release
     
     steps:
       - name: Checkout code
@@ -28,19 +26,6 @@ jobs:
           fi
           echo "idf_component.yml file exists"
           cat idf_component.yml
-
-      - name: Extract version
-        id: get_version
-        run: |
-          if [ -n "${{ github.event.release.tag_name }}" ]; then
-            VERSION=${GITHUB_EVENT_RELEASE_TAG_NAME#v}
-          elif [ -n "${{ github.ref }}" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION=$(grep '^version:' idf_component.yml | awk '{print $2}' | tr -d '"' | tr -d "'")
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
 
       - name: Create Release if not exists
         if: github.event_name == 'push'
@@ -69,35 +54,20 @@ jobs:
               }"
           fi
 
-      - name: Trigger ESP Registry Sync
-        env:
-          IDF_COMPONENT_API_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
-        run: |
-          echo "Triggering ESP Component Registry sync..."
-          
-          if [ -n "$IDF_COMPONENT_API_TOKEN" ]; then
-            echo "Using API Token for sync..."
-            # Try to trigger sync via API if token is available
-            curl -X POST \
-              -H "Authorization: Bearer $IDF_COMPONENT_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              "https://api.components.espressif.com/v1/webhooks/github" \
-              -d "{\"repository\": \"txp666/otto-emoji-gif-component\", \"tag\": \"${{ github.ref_name }}\"}" \
-              || echo "API call failed, will sync via automatic scan"
-          else
-            echo "IDF_COMPONENT_API_TOKEN not set"
-            echo "Component will be synced via ESP Component Registry automatic scan (may take minutes to hours)"
-            echo "Get Token: https://components.espressif.com/ -> Settings -> Tokens"
-          fi
+      - name: Upload component to component service
+        uses: espressif/upload-components-ci-action@v1
+        with:
+          directories: >
+            .
+          namespace: "txp666"
+          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
 
       - name: Summary
         run: |
           echo "## Component Release Info" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${{ steps.get_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Repository**: https://github.com/txp666/otto-emoji-gif-component" >> $GITHUB_STEP_SUMMARY
           echo "- **Component Link**: https://components.espressif.com/components/txp666/otto-emoji-gif-component" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Component will be automatically synced to ESP Component Registry." >> $GITHUB_STEP_SUMMARY
-
+          echo "Component uploaded to ESP Component Registry." >> $GITHUB_STEP_SUMMARY
